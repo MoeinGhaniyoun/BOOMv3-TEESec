@@ -33,6 +33,11 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
       Mux(taken, v + 1.U, v - 1.U)))
   }
 
+ //teesec
+ printf("FAUBTB TagSize: %d   OffsetSize: %d vaddrBitsExtended: %d\n", tagSz.asUInt, offsetSz.asUInt, vaddrBitsExtended.asUInt);
+
+
+
   require(isPow2(nWays))
 
   class MicroBTBEntry extends Bundle {
@@ -56,7 +61,7 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
 
   val meta     = RegInit((0.U).asTypeOf(Vec(nWays, Vec(bankWidth, new MicroBTBMeta))))
   val btb      = Reg(Vec(nWays, Vec(bankWidth, new MicroBTBEntry)))
-
+  
   val mems = Nil
 
   val s1_req_tag   = s1_idx
@@ -84,7 +89,19 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
     s1_taken(w)      := !entry_meta.is_br || entry_meta.ctr(1)
 
     s1_meta.hits(w)     := s1_hits(w)
+    
+  //teesec
+    printf("FAUBTB Resp valid: %d  Resp: %x s1_pc: %x s1_req_tag(37bit): 0x%x s1_req_tag(full): 0x%x Which bank? %d\n", s1_resp(w).valid, s1_resp(w).bits, (s1_pc.asSInt + (w << 1).S).asUInt, s1_req_tag(tagSz-1,0).asUInt, s1_req_tag.asUInt, w.asUInt);
   }
+
+ //teesec
+  for (w <- 0 until nWays){
+    for (i <- 0 until bankWidth){
+      printf("btb offsets: btb[%d][%d] = %x meta[%d][%d] = is_br: %d tag: %x ctr: %d target: %x\n", w.asUInt, i.asUInt, btb(w)(i).offset.asSInt, w.asUInt, i.asUInt, meta(w)(i).is_br, meta(w)(i).tag.asUInt, meta(w)(i).ctr.asUInt,(s1_pc.asSInt + (i << 1).S + btb(s1_hit_ways(i))(i).offset).asUInt );
+
+    }
+  }
+
   val alloc_way = {
     val r_metas = Cat(VecInit(meta.map(e => VecInit(e.map(_.tag)))).asUInt, s1_idx(tagSz-1,0))
     val l = log2Ceil(nWays)
@@ -129,6 +146,10 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
   // Write the BTB with the target
   when (s1_update.valid && s1_update.bits.cfi_taken && s1_update.bits.cfi_idx.valid && s1_update.bits.is_commit_update) {
     btb(s1_update_write_way)(s1_update_cfi_idx).offset := new_offset_value
+  
+    //teesec
+    printf("BTB Update. Offset is : 0x%x  Which way? %d Which bank? %d\n", new_offset_value, s1_update_write_way, s1_update_cfi_idx );
+
   }
 
   // Write the meta
@@ -145,6 +166,10 @@ class FAMicroBTBBranchPredictorBank(params: BoomFAMicroBTBParams = BoomFAMicroBT
         Mux(was_taken, 3.U, 0.U),
         bimWrite(meta(s1_update_write_way)(w).ctr, was_taken)
       )
+
+//teesec
+    printf("META Update. tag is : 0x%x  Which way? %d Which bank? %d\n", s1_update_idx, s1_update_write_way, w.asUInt );
+
     }
   }
 

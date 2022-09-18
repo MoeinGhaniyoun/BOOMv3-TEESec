@@ -39,6 +39,14 @@ class ExecutionUnits(val fpu: Boolean)(implicit val p: Parameters) extends HasBo
 
   def length = exe_units.length
 
+  //Printing the number of execution units
+  //////////////////////////////////
+  
+  printf (p"NumExecutionUnits = $length\n")
+        
+  //////////////////////////////////
+
+  
   def apply(n: Int) = exe_units(n)
 
   def map[T](f: ExecutionUnit => T) = {

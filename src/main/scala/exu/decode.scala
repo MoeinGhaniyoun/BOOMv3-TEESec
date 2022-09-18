@@ -707,6 +707,7 @@ class BranchDecode(implicit p: Parameters) extends BoomModule
   )
 }
 
+
 /**
  * Track the current "branch mask", and give out the branch mask to each micro-op in Decode
  * (each micro-op in the machine has a branch mask which says which branches it

@@ -14,12 +14,42 @@ import boom.common._
 import boom.exu.{BrResolutionInfo, Exception, FuncUnitResp, CommitSignals}
 import boom.util.{BoolToChar, AgePriorityEncoder, IsKilledByBranch, GetNewBrMask, WrapInc, IsOlder, UpdateBrMask}
 
+//This two classes were added to the source code in replacement of their equivalent: TLBReq/TLBResp
+////////////////////////////////////////////////////////////////////////////////////////////////
+class TLBReqq(lgMaxSize: Int)(implicit p: Parameters) extends BoomBundle()(p)
+with HasBoomUOP
+{
+  val vaddr = UInt(vaddrBitsExtended.W)
+  val passthrough = Bool()
+  val size = UInt(log2Ceil(lgMaxSize + 1).W)
+  val cmd  = Bits(M_SZ.W)
+
+  override def cloneType = new TLBReqq(lgMaxSize).asInstanceOf[this.type]
+}
+
+class TLBRespp(implicit p: Parameters) extends BoomBundle()(p) 
+with HasBoomUOP
+{
+  // lookup responses
+  val miss = Bool()
+  val paddr = UInt(paddrBits.W)
+  val pf = new TLBExceptions
+  val ae = new TLBExceptions
+  val ma = new TLBExceptions
+  val cacheable = Bool()
+  val must_alloc = Bool()
+  val prefetchable = Bool()
+}
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
 class NBDTLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: TLEdgeOut, p: Parameters) extends BoomModule()(p) {
   require(!instruction)
   val io = IO(new Bundle {
-    val req = Flipped(Vec(memWidth, Decoupled(new TLBReq(lgMaxSize))))
+    val req = Flipped(Vec(memWidth, Decoupled(new TLBReqq(lgMaxSize))))
     val miss_rdy = Output(Bool())
-    val resp = Output(Vec(memWidth, new TLBResp))
+    val resp = Output(Vec(memWidth, new TLBRespp))
     val sfence = Input(Valid(new SFenceReq))
     val ptw = new TLBPTWIO
     val kill = Input(Bool())
@@ -302,6 +332,7 @@ class NBDTLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge
     io.resp(w).prefetchable := (prefetchable_array(w) & hits(w)).orR && edge.manager.managers.forall(m => !m.supportsAcquireB || m.supportsHint).B
     io.resp(w).miss  := do_refill || tlb_miss(w) || multipleHits(w)
     io.resp(w).paddr := Cat(ppn(w), io.req(w).bits.vaddr(pgIdxBits-1, 0))
+    io.resp(w).uop := io.req(w).bits.uop
   }
 
   io.ptw.req.valid := state === s_request
@@ -352,6 +383,55 @@ class NBDTLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge
     val valids = set.map(_.valid.orR).asUInt
     Mux(valids.andR, alt, PriorityEncoder(~valids))
   }
+//////////////////////////
 
+//Printing TLB entries
+
+  printf("///////////////////////////////////////\n")
+  printf(p"AllEntries = $all_entries\n")
+  printf(p"OrdinaryEtries = $ordinary_entries\n")
+  printf(p"SectoredEntries = $sectored_entries\n")
+  printf(p"SuperpageEntries = $superpage_entries\n")
+  printf(p"SpecialEntries = $special_entry\n")
+  printf("///////////////////////////////////////\n")
+  printf("TLB Entries\n")
+  printf("Sectored Entries\n")
+  for (j <- 0 until (cfg.nSets * cfg.nWays) / cfg.nSectors){   //This can be replaced with 2
+
+    for (i <- 0 until cfg.nSectors){  ////This can be replaced with 4
+      printf("Secotor[%d]Entry[%d]: ppn:0x%x, u: (%c), g: (%c), ae: (%c), sw: (%c), sx: (%c), sr: (%c), pw: (%c), px: (%c), pr: (%c), pal: (%c), paa: (%c), eff: (%c), c: (%c), fs: (%c) ",
+        j.U, i.U, 
+        sectored_entries(j).data(i).asTypeOf(new EntryData).ppn, BoolToChar(sectored_entries(0).data(i).asTypeOf(new EntryData).u, 'T'),
+        BoolToChar(sectored_entries(j).data(i).asTypeOf(new EntryData).g, 'T'), BoolToChar(sectored_entries(j).data(i).asTypeOf(new EntryData).ae, 'T'),
+        BoolToChar(sectored_entries(j).data(i).asTypeOf(new EntryData).sw, 'T'),BoolToChar(sectored_entries(j).data(i).asTypeOf(new EntryData).sx, 'T'),
+        BoolToChar(sectored_entries(j).data(i).asTypeOf(new EntryData).sr, 'T'),BoolToChar(sectored_entries(j).data(i).asTypeOf(new EntryData).pw, 'T'),
+        BoolToChar(sectored_entries(j).data(i).asTypeOf(new EntryData).px, 'T'),BoolToChar(sectored_entries(j).data(i).asTypeOf(new EntryData).pr, 'T'),
+        BoolToChar(sectored_entries(j).data(i).asTypeOf(new EntryData).pal, 'T'),BoolToChar(sectored_entries(j).data(i).asTypeOf(new EntryData).paa, 'T'),
+        BoolToChar(sectored_entries(j).data(i).asTypeOf(new EntryData).eff, 'T'),BoolToChar(sectored_entries(j).data(i).asTypeOf(new EntryData).c, 'T'),
+        BoolToChar(sectored_entries(j).data(i).asTypeOf(new EntryData).fragmented_superpage, 'T'))
+      printf("\n")
+    }
+  }
+  printf("Superpage Entries\n")  
+  for (j <- 0 until cfg.nSuperpageEntries){ ////This can be replaced with 4
+
+    for (i <- 0 until 1){
+      printf("Secotor[%d]Entry[%d]: ppn:0x%x, u: (%c), g: (%c), ae: (%c), sw: (%c), sx: (%c), sr: (%c), pw: (%c), px: (%c), pr: (%c), pal: (%c), paa: (%c), eff: (%c), c: (%c), fs: (%c) ",
+        j.U, i.U, 
+        superpage_entries(j).data(i).asTypeOf(new EntryData).ppn, BoolToChar(superpage_entries(0).data(i).asTypeOf(new EntryData).u, 'T'),
+        BoolToChar(superpage_entries(j).data(i).asTypeOf(new EntryData).g, 'T'), BoolToChar(superpage_entries(j).data(i).asTypeOf(new EntryData).ae, 'T'),
+        BoolToChar(superpage_entries(j).data(i).asTypeOf(new EntryData).sw, 'T'),BoolToChar(superpage_entries(j).data(i).asTypeOf(new EntryData).sx, 'T'),
+        BoolToChar(superpage_entries(j).data(i).asTypeOf(new EntryData).sr, 'T'),BoolToChar(superpage_entries(j).data(i).asTypeOf(new EntryData).pw, 'T'),
+        BoolToChar(superpage_entries(j).data(i).asTypeOf(new EntryData).px, 'T'),BoolToChar(superpage_entries(j).data(i).asTypeOf(new EntryData).pr, 'T'),
+        BoolToChar(superpage_entries(j).data(i).asTypeOf(new EntryData).pal, 'T'),BoolToChar(superpage_entries(j).data(i).asTypeOf(new EntryData).paa, 'T'),
+        BoolToChar(superpage_entries(j).data(i).asTypeOf(new EntryData).eff, 'T'),BoolToChar(superpage_entries(j).data(i).asTypeOf(new EntryData).c, 'T'),
+        BoolToChar(superpage_entries(j).data(i).asTypeOf(new EntryData).fragmented_superpage, 'T'))
+      printf("\n")
+    }
+  }
+
+
+         
+/////////////////////
 
 }

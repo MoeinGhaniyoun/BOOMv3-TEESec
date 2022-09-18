@@ -29,6 +29,9 @@ class DispatchIO(implicit p: Parameters) extends BoomBundle
   // N issues each accept up to dispatchWidth uops
   // dispatchWidth may vary between issue queues
   val dis_uops = MixedVec(issueParams.map(ip=>Vec(ip.dispatchWidth, DecoupledIO(new MicroOp))))
+  
+  // fast-bypass
+  val fast_bypass = Valid(new MicroOp())
 }
 
 abstract class Dispatcher(implicit p: Parameters) extends BoomModule
@@ -45,6 +48,8 @@ class BasicDispatcher(implicit p: Parameters) extends Dispatcher
   issueParams.map(ip=>require(ip.dispatchWidth == coreWidth))
 
   val ren_readys = io.dis_uops.map(d=>VecInit(d.map(_.ready)).asUInt).reduce(_&_)
+  // fast-bypass
+  io.fast_bypass.valid := false.B
 
   for (w <- 0 until coreWidth) {
     io.ren_uops(w).ready := ren_readys(w)
@@ -57,6 +62,15 @@ class BasicDispatcher(implicit p: Parameters) extends Dispatcher
 
     dis(w).valid := io.ren_uops(w).valid && ((io.ren_uops(w).bits.iq_type & issueParam.iqType.U) =/= 0.U)
     dis(w).bits  := io.ren_uops(w).bits
+
+    // fast-bypass (commented for SpecShield Test. Otherwise should not be commented)
+    /*
+    when (io.ren_uops(w).bits.uopc === 19.U){
+      io.fast_bypass.valid := true.B
+      io.fast_bypass.bits := io.ren_uops(w).bits
+      printf("Dispatched the AND instruction read request. is Valid? %d opcode: %d\n", io.fast_bypass.valid, io.fast_bypass.bits.uopc)
+    }
+    */
   }
 }
 
@@ -70,6 +84,7 @@ class BasicDispatcher(implicit p: Parameters) extends Dispatcher
 class CompactingDispatcher(implicit p: Parameters) extends Dispatcher
 {
   issueParams.map(ip => require(ip.dispatchWidth >= ip.issueWidth))
+
 
   val ren_readys = Wire(Vec(issueParams.size, Vec(coreWidth, Bool())))
 

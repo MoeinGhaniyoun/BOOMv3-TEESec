@@ -195,5 +195,23 @@ class FetchBuffer(implicit p: Parameters) extends BoomModule
   when (reset.toBool) {
     io.deq.bits.uops map { u => u.valid := false.B }
   }
+  //-------------------------------------------------------------
+  // **** Printfs ****
+  //-------------------------------------------------------------
 
+    printf("FetchBuffer:\n")
+    // TODO a problem if we don't check the f3_valid?
+    printf("    Fetch3: Enq:(V:%c Msk:0x%x PC:0x%x) Clear:%c\n",
+      BoolToChar(io.enq.valid, 'V'),
+      io.enq.bits.mask,
+      io.enq.bits.pc,
+      BoolToChar(io.clear, 'C'))
+
+    printf("    RAM: WPtr:%d RPtr:%d\n",
+      tail,
+      head)
+
+    printf("    Fetch4: Deq:(V:%c PC:0x%x)\n",
+      BoolToChar(io.deq.valid, 'V'),
+      io.deq.bits.uops(0).bits.debug_pc)
 }

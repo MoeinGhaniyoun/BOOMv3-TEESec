@@ -82,7 +82,12 @@ abstract class RegisterFile(
   val io = IO(new BoomBundle {
     val read_ports = Vec(numReadPorts, new RegisterFileReadPortIO(maxPregSz, registerWidth))
     val write_ports = Flipped(Vec(numWritePorts, Valid(new RegisterFileWritePort(maxPregSz, registerWidth))))
+    // fast-bypass
+    val fast_bypass = Flipped(Valid(new MicroOp()))
+    val fast_bypass_resp = Valid(new MicroOp())
   })
+  // fast-bypass
+  printf("numReadPorts: %d\n",numReadPorts.asUInt)
 
   private val rf_cost = (numReadPorts + numWritePorts) * (numReadPorts + 2*numWritePorts)
   private val type_str = if (registerWidth == fLen+1) "Floating Point" else "Integer"
@@ -127,7 +132,25 @@ class RegisterFileSynthesizable(
   for (i <- 0 until numReadPorts) {
     read_data(i) := regfile(read_addrs(i))
   }
+  
+  //fast-bypass
+  io.fast_bypass_resp.valid := 0.U 
+    when (io.fast_bypass.valid === 1.U && !(io.fast_bypass.bits.prs1_busy)){
+    io.fast_bypass_resp.bits := io.fast_bypass.bits
+    io.fast_bypass_resp.bits.fast_bypass := true.B
+    io.fast_bypass_resp.valid := Mux(regfile(io.fast_bypass.bits.prs1) === 0.U, 1.U, 0.U)
+    printf("Received read request from Dispatch. respValid: %d  resp: 0x%x\n", io.fast_bypass_resp.valid, io.fast_bypass_resp.bits.uopc)
+  }
+  when (io.fast_bypass_resp.valid){
+    regfile(io.fast_bypass.bits.pdst) := 0.U
+    printf("Writing zero on register file for fast-bypass\n")
+  }
 
+
+
+  for (i <- 0 until numRegisters) {
+      printf ("Register Number %d = %x \n", i.U, regfile(i))
+  }
   // --------------------------------------------------------------
   // Bypass out of the ALU's write ports.
   // We are assuming we cannot bypass a writer to a reader within the regfile memory
@@ -161,6 +184,7 @@ class RegisterFileSynthesizable(
   for (wport <- io.write_ports) {
     when (wport.valid) {
       regfile(wport.bits.addr) := wport.bits.data
+      printf ("Writing on PRF: Address: 0x%x  Data: 0x%x NumWritePorts: %d\n", wport.bits.addr, wport.bits.data, numWritePorts.U)
     }
   }
 

@@ -96,9 +96,9 @@ case class BoomCoreParams(
   scontextWidth: Int = 0,
 
   /* debug stuff */
-  enableCommitLogPrintf: Boolean = false,
-  enableBranchPrintf: Boolean = false,
-  enableMemtracePrintf: Boolean = false
+  enableCommitLogPrintf: Boolean = true,
+  enableBranchPrintf: Boolean = true,
+  enableMemtracePrintf: Boolean = true
 
 // DOC include end: BOOM Parameters
 ) extends freechips.rocketchip.tile.CoreParams

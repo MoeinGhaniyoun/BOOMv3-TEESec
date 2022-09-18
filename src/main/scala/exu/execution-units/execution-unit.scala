@@ -28,7 +28,7 @@ import freechips.rocketchip.tile
 import FUConstants._
 import boom.common._
 import boom.ifu.{GetPCFromFtqIO}
-import boom.util.{ImmGen, IsKilledByBranch, BranchKillableQueue, BoomCoreStringPrefix}
+import boom.util.{BoolToChar, ImmGen, IsKilledByBranch, BranchKillableQueue, BoomCoreStringPrefix}
 
 /**
  * Response from Execution Unit. Bundles a MicroOp with data
@@ -41,6 +41,8 @@ class ExeUnitResp(val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
   val data = Bits(dataWidth.W)
   val predicated = Bool() // Was this predicated off?
   val fflags = new ValidIO(new FFlagsResp) // write fflags to ROB // TODO: Do this better
+  //specshieldERP+
+  val tainted = Bool()
 }
 
 /**
@@ -262,13 +264,18 @@ class ALUExeUnit(
     alu = Module(new ALUUnit(isJmpUnit = hasJmpUnit,
                              numStages = numBypassStages,
                              dataWidth = xLen))
+
+    // fast-bypass (added condition to check whether we should execute this AND instruction)                         
     alu.io.req.valid := (
-      io.req.valid &&
+      io.req.valid && !io.req.bits.uop.fast_bypass &&
       (io.req.bits.uop.fu_code === FU_ALU ||
        io.req.bits.uop.fu_code === FU_JMP ||
       (io.req.bits.uop.fu_code === FU_CSR && io.req.bits.uop.uopc =/= uopROCC)))
     //ROCC Rocc Commands are taken by the RoCC unit
 
+    // fast-bypass
+    printf("execution unit: this is the opcode %d\n", io.req.bits.uop.uopc.asUInt)
+    printf("execution unit: this is the fast_bypass %d\n", io.req.bits.uop.fast_bypass.asUInt)
     alu.io.req.bits.uop      := io.req.bits.uop
     alu.io.req.bits.kill     := io.req.bits.kill
     alu.io.req.bits.rs1_data := io.req.bits.rs1_data
@@ -280,8 +287,27 @@ class ALUExeUnit(
 
     iresp_fu_units += alu
 
+    ////////////////////////////////////////////////
+    when (alu.io.req.valid === 1.B) {
+        printf("IsALUValid? Req:(%c) PC:0x%x\n", BoolToChar(alu.io.req.valid, 'V'), alu.io.req.bits.uop.debug_pc)
+
+    }
+    when (alu.io.resp.valid === 1.B) {
+        printf("IsALUValid? Res:(%c) PC:0x%x\n", BoolToChar(alu.io.resp.valid, 'V'), alu.io.resp.bits.uop.debug_pc)
+
+    }
+    ////////////////////////////////////////////////
+   // printf("IsALUValid? Req:(%c) PC:0x%x\n", BoolToChar(alu.io.req.valid, 'V'), alu.io.req.bits.uop.debug_pc)
+   // printf("IsALUValid? Res:(%c) PC:0x%x\n", BoolToChar(alu.io.resp.valid, 'V'), alu.io.resp.bits.uop.debug_pc)
+    
     // Bypassing only applies to ALU
     io.bypass := alu.io.bypass
+
+    ////////////////
+    for (i <- 0 until numBypassStages) {
+    printf("IsBypassValid? (%c) PC:0x%x\n", BoolToChar(alu.io.bypass(i).valid, 'V'), alu.io.bypass(i).bits.uop.debug_pc)
+    }
+    ////////////////
 
     // branch unit is embedded inside the ALU
     io.brinfo := alu.io.brinfo
@@ -323,6 +349,19 @@ class ALUExeUnit(
     imul.io.req.bits.kill     := io.req.bits.kill
     imul.io.brupdate := io.brupdate
     iresp_fu_units += imul
+
+    when (imul.io.req.valid === 1.B) {
+        printf("IsMulValid? Req:(%c) PC:0x%x\n", BoolToChar(imul.io.req.valid, 'V'), imul.io.req.bits.uop.debug_pc)
+
+    }
+    when (imul.io.resp.valid === 1.B) {
+        printf("IsMulValid? Res:(%c) PC:0x%x\n", BoolToChar(imul.io.resp.valid, 'V'), imul.io.resp.bits.uop.debug_pc)
+
+    }
+    ////////////////
+   // printf("IsMulValid? Req:(%c) PC:0x%x\n", BoolToChar(imul.io.req.valid, 'V'), imul.io.req.bits.uop.debug_pc)
+   // printf("IsMulValid? Res:(%c) PC:0x%x\n", BoolToChar(imul.io.resp.valid, 'V'), imul.io.resp.bits.uop.debug_pc)
+    ////////////////
   }
 
   var ifpu: IntToFPUnit = null
@@ -344,6 +383,9 @@ class ALUExeUnit(
     queue.io.enq.bits.fflags := ifpu.io.resp.bits.fflags
     queue.io.brupdate := io.brupdate
     queue.io.flush := io.req.bits.kill
+    
+    //specshieldERP+
+    queue.io.enq.bits.tainted := DontCare
 
     io.ll_fresp <> queue.io.deq
     ifpu_busy := !(queue.io.empty)
@@ -371,6 +413,21 @@ class ALUExeUnit(
                     (io.req.valid && io.req.bits.uop.fu_code_is(FU_DIV))
 
     iresp_fu_units += div
+
+
+    when (div.io.req.valid === 1.B) {
+        printf("IsDivValid? Req:(%c) PC:0x%x\n", BoolToChar(div.io.req.valid, 'V'), div.io.req.bits.uop.debug_pc)
+
+    }
+    when (div.io.resp.valid === 1.B) {
+        printf("IsDivValid? Res:(%c) PC:0x%x\n", BoolToChar(div.io.resp.valid, 'V'), div.io.resp.bits.uop.debug_pc)
+
+    }
+
+    ////////////////
+   // printf("IsDivValid? Req:(%c) PC:0x%x\n", BoolToChar(div.io.req.valid, 'V'), div.io.req.bits.uop.debug_pc)
+   // printf("IsDivValid? Res:(%c) PC:0x%x\n", BoolToChar(div.io.resp.valid, 'V'), div.io.resp.bits.uop.debug_pc)
+    ////////////////
   }
 
   // Mem Unit --------------------------
@@ -387,6 +444,20 @@ class ALUExeUnit(
     maddrcalc.io.resp.ready := DontCare
     require(numBypassStages == 0)
 
+     when (maddrcalc.io.req.valid === 1.B) {
+        printf("IsMemValid? Req:(%c) PC:0x%x\n", BoolToChar(maddrcalc.io.req.valid, 'V'), maddrcalc.io.req.bits.uop.debug_pc)
+
+    }  
+    when (maddrcalc.io.resp.valid === 1.B) {
+        printf("IsMemValid? Res:(%c) PC:0x%x\n", BoolToChar(maddrcalc.io.resp.valid, 'V'), maddrcalc.io.resp.bits.uop.debug_pc)
+
+    }                               
+    ////////////////
+   //printf("IsMemValid? Req:(%c) PC:0x%x\n", BoolToChar(maddrcalc.io.req.valid, 'V'), maddrcalc.io.req.bits.uop.debug_pc)
+    //printf("IsMemValid? Res:(%c) PC:0x%x\n", BoolToChar(maddrcalc.io.resp.valid, 'V'), maddrcalc.io.resp.bits.uop.debug_pc)
+    ////////////////  
+
+    
     io.lsu_io.req := maddrcalc.io.resp
 
     io.ll_iresp <> io.lsu_io.iresp
@@ -537,6 +608,9 @@ class FPUExeUnit(
     queue.io.brupdate          := io.brupdate
     queue.io.flush           := io.req.bits.kill
 
+    //specshieldERP+
+    queue.io.enq.bits.tainted := DontCare
+
     assert (queue.io.enq.ready) // If this backs up, we've miscalculated the size of the queue.
 
     val fp_sdq = Module(new BranchKillableQueue(new ExeUnitResp(dataWidth),
@@ -548,6 +622,9 @@ class FPUExeUnit(
     fp_sdq.io.enq.bits.fflags := DontCare
     fp_sdq.io.brupdate         := io.brupdate
     fp_sdq.io.flush          := io.req.bits.kill
+    
+    //specshieldERP+
+    fp_sdq.io.enq.bits.tainted := DontCare
 
     assert(!(fp_sdq.io.enq.valid && !fp_sdq.io.enq.ready))
 

@@ -984,7 +984,11 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   ftq.io.debug_ftq_idx := io.cpu.debug_ftq_idx
   io.cpu.debug_fetch_pc := ftq.io.debug_fetch_pc
 
+  //-------------------------------------------------------------
+  // performance events
 
+  //Print Some Values
+  printf ("Instruction TLB Miss: (%c)   ICache Miss:  (%c)\n", BoolToChar(io.ptw.req.fire(), 'V'), BoolToChar(icache.io.perf.acquire, 'V'))
   override def toString: String =
     (BoomCoreStringPrefix("====Overall Frontend Params====") + "\n"
     + icache.toString + bpd.toString)

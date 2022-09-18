@@ -53,6 +53,12 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
 
     val debug_tsc_reg    = Input(UInt(width=xLen.W))
     val debug_wb_wdata   = Output(Vec(numWakeupPorts, UInt((fLen+1).W)))
+
+    //specshieldERP+ 
+    //val shadow_regfile   = Input(UInt(numIntPhysRegs.W))
+    val shadow_regfile     = Input(Vec(numIntPhysRegs, UInt(1.W)))
+    // fast-bypass
+    val fast_bypass      = Flipped(Valid(new MicroOp))
   })
 
   //**********************************
@@ -63,6 +69,13 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
                          issueParams.find(_.iqType == IQT_FP.litValue).get,
                          numWakeupPorts))
   issue_unit.suggestName("fp_issue_unit")
+
+  //fast-bypass
+  issue_unit.io.fast_bypass := io.fast_bypass
+
+  //specshieldERP+
+  issue_unit.io.shadow_regfile := io.shadow_regfile
+  
   val fregfile       = Module(new RegisterFileSynthesizable(numFpPhysRegs,
                          exe_units.numFrfReadPorts,
                          exe_units.numFrfWritePorts + memWidth,
@@ -78,6 +91,8 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
                          0, // No bypass for FP
                          0,
                          fLen+1))
+  // fast-bypass
+  fregfile.io.fast_bypass := io.fast_bypass
 
   require (exe_units.count(_.readsFrf) == issue_unit.issueWidth)
   require (exe_units.numFrfWritePorts + numLlPorts == numWakeupPorts)
@@ -99,7 +114,11 @@ class FpPipeline(implicit p: Parameters) extends BoomModule with tile.HasFPUPara
   issue_unit.io.ld_miss := false.B
 
   require (exe_units.numTotalBypassPorts == 0)
-
+  
+  //specshieldERP+
+  for (w <- 0 until numWakeupPorts) {
+    issue_unit.io.wakeup_ports(w).bits.tainted := DontCare
+  }
   //-------------------------------------------------------------
   // **** Dispatch Stage ****
   //-------------------------------------------------------------

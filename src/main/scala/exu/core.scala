@@ -110,6 +110,14 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val issue_units      = Seq(mem_iss_unit, int_iss_unit)
   val dispatcher       = Module(new BasicDispatcher)
 
+  // specshieldERP+ shadow register file 
+  //val shadow_regfile = RegInit(0.U(numIntPhysRegs.W))
+  val shadow_regfile = RegInit(VecInit(Seq.fill(numIntPhysRegs)(0.U(1.W))))
+  
+  int_iss_unit.io.shadow_regfile := shadow_regfile
+  mem_iss_unit.io.shadow_regfile := shadow_regfile
+  fp_pipeline.io.shadow_regfile  := shadow_regfile
+  
   val iregfile         = Module(new RegisterFileSynthesizable(
                              numIntPhysRegs,
                              numIrfReadPorts,
@@ -140,10 +148,32 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val rob              = Module(new Rob(
                            numIrfWritePorts + numFpWakeupPorts, // +memWidth for ll writebacks
                            numFpWakeupPorts))
+  
+  /////////////////////////////////////////////////////////////////
+  //fast-bypass
+  fp_pipeline.io.fast_bypass := dispatcher.io.fast_bypass
+  iregfile.io.fast_bypass := dispatcher.io.fast_bypass 
+  mem_iss_unit.io.fast_bypass := iregfile.io.fast_bypass_resp
+  val fast_bypass_resp = RegNext(iregfile.io.fast_bypass_resp)
+  //int_iss_unit.io.fast_bypass := fast_bypass_resp
+  int_iss_unit.io.fast_bypass := iregfile.io.fast_bypass_resp
+  rob.io.fast_bypass := fast_bypass_resp
+  
+  
+  
+  
+  
+  
+  
+  
+  
   // Used to wakeup registers in rename and issue. ROB needs to listen to something else.
   val int_iss_wakeups  = Wire(Vec(numIntIssueWakeupPorts, Valid(new ExeUnitResp(xLen))))
   val int_ren_wakeups  = Wire(Vec(numIntRenameWakeupPorts, Valid(new ExeUnitResp(xLen))))
   val pred_wakeup  = Wire(Valid(new ExeUnitResp(1)))
+
+  //specshieldERP+
+  pred_wakeup.bits.tainted := DontCare
 
   require (exe_units.length == issue_units.map(_.issueWidth).sum)
 
@@ -234,6 +264,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   // Load/Store Unit & ExeUnits
   val mem_units = exe_units.memory_units
   val mem_resps = mem_units.map(_.io.ll_iresp)
+
+  
   for (i <- 0 until memWidth) {
     mem_units(i).io.lsu_io <> io.lsu.exe(i)
   }
@@ -275,6 +307,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //val icache_blocked = !(io.ifu.fetchpacket.valid || RegNext(io.ifu.fetchpacket.valid))
   val icache_blocked = false.B
   csr.io.counters foreach { c => c.inc := RegNext(perfEvents.evaluate(c.eventSel)) }
+
+  //specshieldSwitch
+  val spec_mode = RegInit(0.U(8.W))
+  spec_mode := csr.io.spec_mode
 
   //****************************************
   // Time Stamp Counter & Retired Instruction Counter
@@ -785,9 +821,157 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
 
   var iss_wu_idx = 1
   var ren_wu_idx = 1
+
+  //specshieldERP+ (untainting logic) 
+  val rob_unt_idx = RegInit(0.U(numIntPhysRegs.W))
+  rob_unt_idx := ~(rob.io.rob_unt_idx)
+  printf("UNTAINTREG-CORE:          %d\n", rob.io.rob_unt_idx)
+  shadow_regfile(rob.io.rob_unt_idx) := 0.U
+  //also handle the vector register from rob
+  for (i <- 0 until numIntPhysRegs){
+    when (rob.io.rob_unt_vec(i) === 0.U){
+      shadow_regfile(i) := rob.io.rob_unt_vec(i) & shadow_regfile(i)
+    }
+    //shadow_regfile(i) := rob.io.rob_unt_vec(i) & shadow_regfile(i)
+  }
+  printf("ShadowRegFile:            ")
+  for (i <- 0 until numIntPhysRegs){
+    printf("%b", shadow_regfile(i))
+  }
+  printf("\n")
+
+  //specshieldERP+ (newest version) (commented for fast-bypass)
+  /*
+  int_iss_wakeups(0).valid := ll_wbarb.io.out.fire() && ll_wbarb.io.out.bits.uop.dst_rtype === RT_FIX
+  int_iss_wakeups(0).bits  := ll_wbarb.io.out.bits
+  // when it is valid ((tainting logic))
+  when(ll_wbarb.io.out.fire() && ll_wbarb.io.out.bits.uop.dst_rtype === RT_FIX && Mux(rob.io.rob_tail_idx.asUInt>rob.io.rob_head_idx.asUInt, (ll_wbarb.io.out.bits.uop.rob_idx.asUInt >= rob.io.rob_pnr_idx.asUInt), Mux(rob.io.rob_head_idx.asUInt>rob.io.rob_pnr_idx.asUInt, (ll_wbarb.io.out.bits.uop.rob_idx.asUInt>=rob.io.rob_pnr_idx.asUInt), ((ll_wbarb.io.out.bits.uop.rob_idx.asUInt>=rob.io.rob_pnr_idx.asUInt) || (ll_wbarb.io.out.bits.uop.rob_idx.asUInt< rob.io.rob_tail_idx.asUInt))))){
+      shadow_regfile := shadow_regfile | (1.U << ll_wbarb.io.out.bits.uop.pdst)
+      printf("Tainting\n")
+  }
+  */
+
+
+  //spechsieldSTL (this is the original code which is commented for our modifications)
+  /*
   // The 0th wakeup port goes to the ll_wbarb
   int_iss_wakeups(0).valid := ll_wbarb.io.out.fire() && ll_wbarb.io.out.bits.uop.dst_rtype === RT_FIX
   int_iss_wakeups(0).bits  := ll_wbarb.io.out.bits
+  */
+
+  //specshieldERP
+  /*
+  val blocking_wakeup = Wire(Valid(new ExeUnitResp(xLen)))
+  blocking_wakeup := DontCare
+  blocking_wakeup.bits.uop := rob.io.past_pnr.bits
+  blocking_wakeup.valid := rob.io.past_pnr.valid && rob.io.past_pnr.bits.uses_ldq
+  int_iss_wakeups(0) := blocking_wakeup
+  */
+
+  //specshieldERP+ (old version)
+  /*
+  val blocking_wakeup = Wire(Valid(new ExeUnitResp(xLen)))
+  blocking_wakeup := DontCare
+  blocking_wakeup.bits.uop := rob.io.past_pnr.bits
+  blocking_wakeup.valid := rob.io.past_pnr.valid && rob.io.past_pnr.bits.uses_ldq
+  val speculative_wakeup = Wire(Valid(new ExeUnitResp(xLen)))
+  speculative_wakeup := DontCare
+  speculative_wakeup.bits.uop := rob.io.past_pnr.bits
+  speculative_wakeup.valid := rob.io.after_pnr.valid && rob.io.after_pnr.bits.uses_ldq
+  */
+
+  //specshieldERP+ (new version)
+  /*
+  val arbiter_wakeup = Module(new Arbiter(new ExeUnitResp(xLen), 2))
+  arbiter_wakeup.io.in(0) := DontCare
+  arbiter_wakeup.io.in(1) := DontCare
+  arbiter_wakeup.io.in(0).bits.uop := rob.io.past_pnr.bits
+  arbiter_wakeup.io.in(0).valid := rob.io.past_pnr.valid && rob.io.past_pnr.bits.uses_ldq
+  arbiter_wakeup.io.in(1).bits.uop := rob.io.after_pnr.bits
+  arbiter_wakeup.io.in(1).valid := rob.io.after_pnr.valid && rob.io.after_pnr.bits.uses_ldq
+  arbiter_wakeup.io.out.ready := DontCare
+  int_iss_wakeups(0).bits := arbiter_wakeup.io.out.bits
+  int_iss_wakeups(0).valid := arbiter_wakeup.io.out.valid
+  // update the shadow register file depending on the speculative bit
+  shadow_regfile(arbiter_wakeup.io.out.bits.uop.pdst) := arbiter_wakeup.io.out.bits.uop.speculative.asUInt
+  */
+
+
+  //specshieldSTL (we are using 0 here as for the index of core width because it is going to be simulated for SmallBoom. Otherwise we have to rewrite it)
+  /*
+  val blocking_wakeup = Wire(Valid(new ExeUnitResp(xLen)))
+  blocking_wakeup := DontCare
+  blocking_wakeup.bits.uop := rob.io.commit.uops(0)
+  blocking_wakeup.valid := rob.io.commit.valids(0) && rob.io.commit.uops(0).uses_ldq
+  int_iss_wakeups(0) := blocking_wakeup
+
+  //specshieldSTL
+  when(ll_wbarb.io.out.fire() && ll_wbarb.io.out.bits.uop.dst_rtype === RT_FIX){
+    printf("WhichReg? %d \n", ll_wbarb.io.out.bits.uop.pdst)
+  }
+*/
+
+  // The 0th wakeup port goes to the ll_wbarb (default-code)
+  /*
+  int_iss_wakeups(0).valid := ll_wbarb.io.out.fire() && ll_wbarb.io.out.bits.uop.dst_rtype === RT_FIX
+  int_iss_wakeups(0).bits  := ll_wbarb.io.out.bits
+  */
+  
+  //specshieldSwitch
+  //////////////////////////////////////////////////////////////////////////////////////////////////////
+  val wake_tainted = WireInit(false.B)
+  //STL
+  val blocking_wakeup = Wire(Valid(new ExeUnitResp(xLen)))
+  blocking_wakeup := DontCare
+  blocking_wakeup.bits.uop := rob.io.commit.uops(0)
+  blocking_wakeup.valid := rob.io.commit.valids(0) && rob.io.commit.uops(0).uses_ldq
+
+  //ERP
+  val blocking_wakeup_ERP = Wire(Valid(new ExeUnitResp(xLen)))
+  blocking_wakeup_ERP := DontCare
+  blocking_wakeup_ERP.bits.uop := rob.io.past_pnr.bits
+  blocking_wakeup_ERP.valid := rob.io.past_pnr.valid && rob.io.past_pnr.bits.uses_ldq
+  
+  //ERP+
+  // when it is valid ((tainting logic))
+  when(ll_wbarb.io.out.fire() && ll_wbarb.io.out.bits.uop.dst_rtype === RT_FIX && (spec_mode === 3.U) && Mux(rob.io.rob_tail_idx.asUInt>rob.io.rob_head_idx.asUInt, (ll_wbarb.io.out.bits.uop.rob_idx.asUInt >= rob.io.rob_pnr_idx.asUInt), Mux(rob.io.rob_head_idx.asUInt>rob.io.rob_pnr_idx.asUInt, (ll_wbarb.io.out.bits.uop.rob_idx.asUInt>=rob.io.rob_pnr_idx.asUInt), ((ll_wbarb.io.out.bits.uop.rob_idx.asUInt>=rob.io.rob_pnr_idx.asUInt) || (ll_wbarb.io.out.bits.uop.rob_idx.asUInt< rob.io.rob_tail_idx.asUInt))))){
+      //shadow_regfile := shadow_regfile | (1.U << ll_wbarb.io.out.bits.uop.pdst)
+      when (!(ll_wbarb.io.out.bits.uop.pdst === 0.U)){
+        //only do this when the register is not 0
+        shadow_regfile(ll_wbarb.io.out.bits.uop.pdst) := 1.U
+        // added to solve the wakeup/taint problem
+        wake_tainted := true.B
+      }
+      printf("Tainting\n")
+  } .otherwise {
+    wake_tainted := false.B
+  }
+  // check the spec_mode
+  when(spec_mode === 1.U){
+    int_iss_wakeups(0) := blocking_wakeup
+    printf("SpecMode is %d\n", spec_mode.asUInt)
+  } .elsewhen (spec_mode === 2.U) {
+    int_iss_wakeups(0) := blocking_wakeup_ERP
+    printf("SpecMode is %d\n", spec_mode.asUInt)
+  } .elsewhen (spec_mode === 3.U) {
+    int_iss_wakeups(0).valid := ll_wbarb.io.out.fire() && ll_wbarb.io.out.bits.uop.dst_rtype === RT_FIX
+    int_iss_wakeups(0).bits.uop  := ll_wbarb.io.out.bits.uop
+    int_iss_wakeups(0).bits.data  := ll_wbarb.io.out.bits.data
+    int_iss_wakeups(0).bits.predicated  := ll_wbarb.io.out.bits.predicated
+    int_iss_wakeups(0).bits.fflags  := ll_wbarb.io.out.bits.fflags
+    int_iss_wakeups(0).bits.tainted  := wake_tainted
+    printf("SpecMode is %d\n", spec_mode.asUInt)
+  } .otherwise {
+    int_iss_wakeups(0).valid := ll_wbarb.io.out.fire() && ll_wbarb.io.out.bits.uop.dst_rtype === RT_FIX && (spec_mode === 0.U)
+    int_iss_wakeups(0).bits  := ll_wbarb.io.out.bits
+    printf("SpecMode is %d\n", spec_mode.asUInt)
+  }
+  
+  //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+  
+
+
 
   int_ren_wakeups(0).valid := ll_wbarb.io.out.fire() && ll_wbarb.io.out.bits.uop.dst_rtype === RT_FIX
   int_ren_wakeups(0).bits  := ll_wbarb.io.out.bits
@@ -795,7 +979,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   for (i <- 1 until memWidth) {
     int_iss_wakeups(i).valid := mem_resps(i).valid && mem_resps(i).bits.uop.dst_rtype === RT_FIX
     int_iss_wakeups(i).bits  := mem_resps(i).bits
-
+    
     int_ren_wakeups(i).valid := mem_resps(i).valid && mem_resps(i).bits.uop.dst_rtype === RT_FIX
     int_ren_wakeups(i).bits  := mem_resps(i).bits
     iss_wu_idx += 1
@@ -809,6 +993,7 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
       val slow_wakeup = Wire(Valid(new ExeUnitResp(xLen)))
       fast_wakeup := DontCare
       slow_wakeup := DontCare
+
 
       val resp = exe_units(i).io.iresp
       assert(!(resp.valid && resp.bits.uop.rf_wen && resp.bits.uop.dst_rtype =/= RT_FIX))
@@ -828,6 +1013,45 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
                                 !resp.bits.uop.bypassable &&
                                 resp.bits.uop.dst_rtype === RT_FIX
 
+      //specshieldERP+ 
+      when (fast_wakeup.valid && (spec_mode === 3.U) && (shadow_regfile(fast_wakeup.bits.uop.prs1).asBool || shadow_regfile(fast_wakeup.bits.uop.prs2).asBool)){
+         printf("ShadowRegFile_Before_Fast: ")
+         for (i <- 0 until numIntPhysRegs){
+            printf("%b", shadow_regfile(i))
+         }
+          printf("\n")
+         when(!(fast_wakeup.bits.uop.pdst === 0.U)){
+          //only do this when the register is not 0
+          shadow_regfile(fast_wakeup.bits.uop.pdst) := 1.U
+          fast_wakeup.bits.tainted := true.B
+         }
+         shadow_regfile(fast_wakeup.bits.uop.pdst) := 1.U
+         printf("ShadowRegFile_After_Fast:  ")
+        for (i <- 0 until numIntPhysRegs){
+            printf("%b", shadow_regfile(i))
+        }
+          printf("\n")
+      } .otherwise{ fast_wakeup.bits.tainted := false.B}
+      when (slow_wakeup.valid && (spec_mode === 3.U) && (shadow_regfile(slow_wakeup.bits.uop.prs1).asBool || shadow_regfile(slow_wakeup.bits.uop.prs2).asBool)){
+       printf("ShadowRegFile_Before_Slow: ") 
+       for (i <- 0 until numIntPhysRegs){
+            printf("%b", shadow_regfile(i))
+         }
+          printf("\n")
+         when (!(slow_wakeup.bits.uop.pdst === 0.U)){
+          // only do this if the register is not 0
+          shadow_regfile(slow_wakeup.bits.uop.pdst) := 1.U
+          slow_wakeup.bits.tainted := true.B
+         }
+         
+        printf("ShadowRegFile_After_Slow   ")
+        for (i <- 0 until numIntPhysRegs){
+            printf("%b", shadow_regfile(i))
+         }
+          printf("\n")
+      } .otherwise{ slow_wakeup.bits.tainted := false.B}
+
+
       if (exe_units(i).bypassable) {
         int_iss_wakeups(iss_wu_idx) := fast_wakeup
         iss_wu_idx += 1
@@ -837,6 +1061,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         iss_wu_idx += 1
       }
 
+      
+
       if (exe_units(i).bypassable) {
         int_ren_wakeups(ren_wu_idx) := fast_wakeup
         ren_wu_idx += 1
@@ -845,6 +1071,15 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         int_ren_wakeups(ren_wu_idx) := slow_wakeup
         ren_wu_idx += 1
       }
+     //specshieldSTL (commented for fast-bypass)
+     /*
+      when (fast_wakeup.valid) {
+      printf("fast-wakeup dst port : %d \n", fast_wakeup.bits.uop.pdst.asUInt);
+      }
+      when (slow_wakeup.valid) {
+        printf("slow-wakeup dst port : %d \n", slow_wakeup.bits.uop.pdst.asUInt);
+      } 
+      */ 
     }
   }
   require (iss_wu_idx == numIntIssueWakeupPorts)
@@ -953,6 +1188,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     issport.valid := wakeup.valid
     issport.bits.pdst := wakeup.bits.uop.pdst
     issport.bits.poisoned := wakeup.bits.uop.iw_p1_poisoned || wakeup.bits.uop.iw_p2_poisoned
+    //specshieldERP+
+    issport.bits.tainted := wakeup.bits.tainted
 
     require (iu.io.wakeup_ports.length == int_iss_wakeups.length)
   }
@@ -1312,7 +1549,10 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
         reset.asBool) {
     idle_cycles := 0.U
   }
+  
   assert (!(idle_cycles.value(13)), "Pipeline has hung.")
+
+  //assert (!(idle_cycles.value(13)), "Pipeline has hung.")
 
   if (usingFPU) {
     fp_pipeline.io.debug_tsc_reg := debug_tsc_reg
@@ -1324,6 +1564,136 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   //-------------------------------------------------------------
   //-------------------------------------------------------------
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    val debugScreenheight = 79
+    println("   ~~Chisel Printout Enabled~~")
+
+    //val numFtqWhitespace = if (DEBUG_PRINTF_FTQ) (ftqSz/4)+1 else 0
+    val numFtqWhitespace = (ftqSz/4)+1
+    val fetchWhitespace = if (fetchWidth >= 8) 2 else 0
+    var whitespace = (debugScreenheight - 25 + 3 -10 + 3 + 4 - coreWidth - (numLdqEntries max numStqEntries) -
+      issueParams.map(_.numEntries).sum - issueParams.length - (numRobEntries/coreWidth) -
+      numFtqWhitespace - fetchWhitespace)
+
+    println(s"   Whitespace padded: ${whitespace}\n")
+
+    printf("--- Cycle=%d --- Retired Instrs=%d ----------------------------------------------\n",
+      debug_tsc_reg,
+      debug_irt_reg & (0xffffff).U)
+
+    printf("Decode:\n")
+    for (w <- 0 until coreWidth) {
+      printf("    Slot:%d (PC:0x%x Valids:%c%c Inst:DASM(%x))\n",
+        w.U,
+        dec_uops(w).debug_pc(19,0),
+        BoolToChar(io.ifu.fetchpacket.valid && dec_fbundle.uops(w).valid && !dec_finished_mask(w), 'V'),
+        BoolToChar(dec_fire(w), 'V'),
+        dec_fbundle.uops(w).bits.debug_inst)
+    }
+
+    printf("Rename:\n")
+    for (w <- 0 until coreWidth) {
+      printf("    Slot:%d (PC:0x%x Valid:%c Inst:DASM(%x))\n",
+        w.U,
+        rename_stage.io.ren2_uops(w).debug_pc(19,0),
+        BoolToChar(rename_stage.io.ren2_mask(w), 'V'),
+        rename_stage.io.ren2_uops(w).debug_inst)
+    }
+
+    printf("Decode Finished:0x%x\n", dec_finished_mask)
+
+    printf("Dispatch:\n")
+    for (w <- 0 until coreWidth) {
+      val ren_uop = dispatcher.io.ren_uops(w).bits
+      printf("    Slot:%d (ISAREG: DST:%d SRCS:%d,%d,%d) (PREG: (#,Bsy,Typ) %d[-](%c) %d[%c](%c) %d[%c](%c) %d[%c](%c))\n",
+        w.U,
+        ren_uop.ldst,
+        ren_uop.lrs1,
+        ren_uop.lrs2,
+        ren_uop.lrs3,
+        ren_uop.pdst,
+        Mux(ren_uop.dst_rtype   === RT_FIX, Str("X"),
+          Mux(ren_uop.dst_rtype === RT_X  , Str("-"),
+            Mux(ren_uop.dst_rtype === RT_FLT, Str("f"),
+              Mux(ren_uop.dst_rtype === RT_PAS, Str("C"), Str("?"))))),
+        ren_uop.prs1,
+        BoolToChar(rename_stage.io.ren2_uops(w).prs1_busy, 'B', 'R'),
+        Mux(ren_uop.lrs1_rtype    === RT_FIX, Str("X"),
+          Mux(ren_uop.lrs1_rtype === RT_X  , Str("-"),
+            Mux(ren_uop.lrs1_rtype === RT_FLT, Str("f"),
+              Mux(ren_uop.lrs1_rtype === RT_PAS, Str("C"), Str("?"))))),
+        ren_uop.prs2,
+        BoolToChar(rename_stage.io.ren2_uops(w).prs2_busy, 'B', 'R'),
+        Mux(ren_uop.lrs2_rtype    === RT_FIX, Str("X"),
+          Mux(ren_uop.lrs2_rtype === RT_X  , Str("-"),
+            Mux(ren_uop.lrs2_rtype === RT_FLT, Str("f"),
+              Mux(ren_uop.lrs2_rtype === RT_PAS, Str("C"), Str("?"))))),
+        ren_uop.prs3,
+        BoolToChar(rename_stage.io.ren2_uops(w).prs3_busy, 'B', 'R'),
+        BoolToChar(ren_uop.frs3_en, 'f', '-'))
+    }
+
+    // ROB Printfs
+    
+      val robTypeStrs = RobTypeToChars(rob.io.debug.state)
+      printf("ROB:\n")
+      printf("    (State:%c%c%c Rdy:%c LAQFull:%c STQFull:%c Flush:%c BMskFull:%c) BMsk:0x%x Mode:%c\n",
+         robTypeStrs(0),
+         robTypeStrs(1),
+         robTypeStrs(2),
+         BoolToChar(           rob.io.ready, '_', '!'),
+         BoolToChar(          io.lsu.ldq_full(0), 'L'),
+         BoolToChar(          io.lsu.stq_full(0), 'S'),
+         BoolToChar(          rob.io.flush.valid, 'F'),
+         BoolToChar(branch_mask_full.reduce(_|_), 'B'),
+         dec_brmask_logic.io.debug_branch_mask,
+         Mux(csr.io.status.prv === (PRV.M).U, Str("M"),
+           Mux(csr.io.status.prv === (PRV.U).U, Str("U"),
+             Mux(csr.io.status.prv === (PRV.S).U, Str("S"), Str("?")))))
+    
+
+    printf("Other:\n")
+    printf("    Expt:(V:%c Cause:%d) Commit:%x IFreeLst:0x%x TotFree:%d IPregLst:0x%x TotPreg:%d\n",
+      BoolToChar(rob.io.com_xcpt.valid, 'E'),
+      rob.io.com_xcpt.bits.cause,
+      rob.io.commit.valids.asUInt,
+      rename_stage.io.debug.freelist,
+      PopCount(rename_stage.io.debug.freelist),
+      rename_stage.io.debug.isprlist,
+      PopCount(rename_stage.io.debug.isprlist))
+    if (usingFPU) {
+      printf("    FFreeList:0x%x TotFree:%d FPrefLst:0x%x TotPreg:%d\n",
+        fp_rename_stage.io.debug.freelist,
+        PopCount(fp_rename_stage.io.debug.freelist),
+        fp_rename_stage.io.debug.isprlist,
+        PopCount(fp_rename_stage.io.debug.isprlist))
+    }
+
+  /*
+    // branch unit
+    printf("Branch Unit:\n")
+    printf("    V:%c Mispred:%c T/NT:%c NPC:(V:%c PC:0x%x)\n",
+      BoolToChar(br_unit.brinfo.valid, 'V'),
+      BoolToChar(br_unit.brinfo.mispredict, 'M'),
+      BoolToChar(br_unit.brinfo.taken, 'T', 'N'),
+      BoolToChar(exe_units(brunit_idx).io.get_ftq_pc.next_val, 'V'),
+      exe_units(brunit_idx).io.get_ftq_pc.next_pc(19,0))
+  */
+
+    // Perf counters
+    
+    /*
+    printf("Instruction Cache Miss:%c, Instruction TLBMiss:%c, L2TLBMiss:%c \n", BoolToChar(io.ifu.perf.acquire, 'T'),
+     BoolToChar(io.ifu.perf.tlbMiss, 'T'), BoolToChar(io.ptw.perf.l2miss, 'T'))
+    */
+
+    for (x <- 0 until whitespace) {
+      printf("|\n")
+    }
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
 
   if (COMMIT_LOG_PRINTF) {
     var new_commit_cnt = 0.U

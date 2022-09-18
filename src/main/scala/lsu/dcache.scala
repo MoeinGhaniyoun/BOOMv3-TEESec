@@ -58,7 +58,13 @@ class BoomWritebackUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1Hella
   io.resp            := false.B
   io.lsu_release.valid := false.B
 
-
+//////////////////////////////////////////////////////////////////////////////////////////
+// Printing Write-back buffer
+printf ("Writeback Buffer: ")
+for (i <- 0 until refillCycles) {
+  printf ("WriteBackBufferEntry [%d] = %x \n", i.U, wb_buffer(i))
+         }
+//////////////////////////////////////////////////////////////////////////////////////////
 
   val r_address = Cat(req.tag, req.idx) << blockOffBits
   val id = cfg.nMSHRs
@@ -107,6 +113,7 @@ class BoomWritebackUnit(implicit edge: TLEdgeOut, p: Parameters) extends L1Hella
     }
     when (r2_data_req_fired) {
       wb_buffer(r2_data_req_cnt) := io.data_resp
+      printf ("Writing on WB: Index: %x  Data: 0x%x \n", r2_data_req_cnt, io.data_resp)
       when (r2_data_req_cnt === (refillCycles-1).U) {
         io.resp := true.B
         state := s_lsu_release
