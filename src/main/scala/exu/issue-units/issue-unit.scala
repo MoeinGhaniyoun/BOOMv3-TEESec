@@ -56,8 +56,6 @@ class IqWakeup(val pregSz: Int) extends Bundle
 {
   val pdst = UInt(width=pregSz.W)
   val poisoned = Bool()
-  //specshieldERP+
-  val tainted = Bool()
 }
 
 /**
@@ -92,9 +90,6 @@ class IssueUnitIO(
 
   val tsc_reg          = Input(UInt(width=xLen.W))
 
-  //specshieldERP+ 
-  //val shadow_regfile   = Input(UInt(numIntPhysRegs.W))
-  val shadow_regfile     = Input(Vec(numIntPhysRegs, UInt(1.W)))
   //fast-bypass
   val fast_bypass       = Flipped(Valid(new MicroOp()))
 }
@@ -158,12 +153,23 @@ abstract class IssueUnit(
   //-------------------------------------------------------------
   // Issue Table
 
+  //fast-bypass
+  val done_fast_bypass = RegInit(false.B)
+  
   val slots = for (i <- 0 until numIssueSlots) yield { val slot = Module(new IssueSlot(numWakeupPorts)); slot }
   val issue_slots = VecInit(slots.map(_.io))
 
   // fast-bypass
   for (i <- 0 until numIssueSlots){
     issue_slots(i).fast_bypass := io.fast_bypass
+  }
+  
+  //fast-bypass
+  done_fast_bypass := (issue_slots.map(s => s.done_fast_bypass).reduce(_|_))
+  
+  // fast-bypass
+  for (i <- 0 until numIssueSlots){
+    issue_slots(i).clear_fast_bypass := done_fast_bypass
   }
 
   for (i <- 0 until numIssueSlots) {
@@ -174,8 +180,6 @@ abstract class IssueUnit(
     issue_slots(i).brupdate         := io.brupdate
     issue_slots(i).kill             := io.flush_pipeline
     
-    //specshieldERP+ 
-    issue_slots(i).shadow_regfile   := io.shadow_regfile
   }
 
   io.event_empty := !(issue_slots.map(s => s.valid).reduce(_|_))

@@ -48,6 +48,7 @@ class BasicDispatcher(implicit p: Parameters) extends Dispatcher
   issueParams.map(ip=>require(ip.dispatchWidth == coreWidth))
 
   val ren_readys = io.dis_uops.map(d=>VecInit(d.map(_.ready)).asUInt).reduce(_&_)
+  
   // fast-bypass
   io.fast_bypass.valid := false.B
 
@@ -63,14 +64,12 @@ class BasicDispatcher(implicit p: Parameters) extends Dispatcher
     dis(w).valid := io.ren_uops(w).valid && ((io.ren_uops(w).bits.iq_type & issueParam.iqType.U) =/= 0.U)
     dis(w).bits  := io.ren_uops(w).bits
 
-    // fast-bypass (commented for SpecShield Test. Otherwise should not be commented)
-    /*
-    when (io.ren_uops(w).bits.uopc === 19.U){
+    // fast-bypass
+    when (io.ren_uops(w).bits.uopc === 19.U && (io.ren_uops(w).valid && ((io.ren_uops(w).bits.iq_type & issueParam.iqType.U) =/= 0.U))){
       io.fast_bypass.valid := true.B
       io.fast_bypass.bits := io.ren_uops(w).bits
       printf("Dispatched the AND instruction read request. is Valid? %d opcode: %d\n", io.fast_bypass.valid, io.fast_bypass.bits.uopc)
     }
-    */
   }
 }
 

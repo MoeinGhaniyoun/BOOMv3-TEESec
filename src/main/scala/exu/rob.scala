@@ -60,9 +60,6 @@ class RobIo(
   val rob_pnr_idx  = Output(UInt(robAddrSz.W))
   val rob_head_idx = Output(UInt(robAddrSz.W))
 
-  //specshieldERP+ (index of destination register) 
-  val rob_unt_idx  = Output(UInt(numIntPhysRegs.W))
-  val rob_unt_vec  = Output(Vec(numIntPhysRegs, UInt(1.W)))
 
   // Handle Branch Misspeculations
   val brupdate = Input(new BrUpdateInfo())
@@ -91,10 +88,6 @@ class RobIo(
   // Commit stage (free resources; also used for rollback).
   val commit = Output(new CommitSignals())
 
-  // specshieldERP 
-  val past_pnr = Valid(new MicroOp())
-  // specshieldERP+ 
-  val after_pnr = Valid(new MicroOp())
 
   // tell the LSU that the head of the ROB is a load
   // (some loads can only execute once they are at the head of the ROB).
@@ -243,9 +236,6 @@ class Rob(
   val rob_tail_lsb = RegInit(0.U((1 max log2Ceil(coreWidth)).W))
   val rob_tail_idx = if (coreWidth == 1) rob_tail else Cat(rob_tail, rob_tail_lsb)
   
-  //specshieldERP+ 
-  val rob_unt_idx  = RegInit(0.U(log2Ceil(numRobRows).W))
-  //val rob_unt_idx_reg  = RegInit(0.U(numIntPhysRegs.W))
 
   val rob_pnr      = RegInit(0.U(log2Ceil(numRobRows).W))
   val rob_pnr_lsb  = RegInit(0.U((1 max log2Ceil(coreWidth)).W))
@@ -317,9 +307,6 @@ class Rob(
   val rob_debug_inst_wdata = Wire(Vec(coreWidth, UInt(32.W)))
   rob_debug_inst_mem.write(rob_tail, rob_debug_inst_wdata, rob_debug_inst_wmask)
   val rob_debug_inst_rdata = rob_debug_inst_mem.read(rob_head, will_commit.reduce(_||_))
-
-  //specshieldERP+ (creating a shadow(!) of shadow register file)
-  val shadow_regfile = RegInit(VecInit(Seq.fill(numIntPhysRegs)(1.U(1.W))))
   
   
   for (w <- 0 until coreWidth) {
@@ -435,42 +422,6 @@ class Rob(
     can_commit(w) := rob_val(rob_head) && !(rob_bsy(rob_head)) && !io.csr_stall
 
 
-    //specshieldERP 
-    val rob_past_pnr_idx = RegNext(AgePriorityEncoder((0 until numRobRows).map(i => {
-    val e = rob_uop(i)
-    val ERP_rob_excp = rob_exception(i)
-    val ERP_rob_bsy = rob_bsy(i)
-    val ERP_rob_unsafe = rob_unsafe(i)
-    val ERP_rob_val = rob_val(i)
-      ERP_rob_val && !ERP_rob_unsafe && !ERP_rob_bsy && !ERP_rob_excp && e.uses_ldq && Mux(rob_tail_idx.asUInt>rob_head_idx.asUInt, ((i.asUInt<rob_pnr_idx.asUInt) || (i.asUInt === rob_head_idx.asUInt)), Mux(rob_head_idx.asUInt>rob_pnr_idx.asUInt, ((i.asUInt<rob_pnr_idx.asUInt) || (i.asUInt>rob_head_idx.asUInt)), ((i.asUInt<rob_pnr_idx.asUInt) || (i.asUInt === rob_pnr_idx.asUInt))))
-    }), rob_head))
-    val ERP_rob_past_pnr            = rob_uop(rob_past_pnr_idx)
-    ERP_rob_past_pnr.speculative := false.B
-    printf(" robpastpnridx: %d \n", rob_past_pnr_idx.asUInt)
-    io.past_pnr := DontCare
-    io.past_pnr.valid := ERP_rob_past_pnr.uses_ldq
-    io.past_pnr.bits := ERP_rob_past_pnr
-    
-
-    //specshieldERP+ (old version)
-    /*
-    val rob_after_pnr_idx = RegNext(AgePriorityEncoder((0 until numRobRows).map(i => {
-    val e = rob_uop(i)
-    val ERP_rob_excp = rob_exception(i)
-    val ERP_rob_bsy = rob_bsy(i)
-    val ERP_rob_unsafe = rob_unsafe(i)
-    val ERP_rob_val = rob_val(i)
-      ERP_rob_val && !ERP_rob_unsafe && !ERP_rob_bsy && !ERP_rob_excp && e.uses_ldq && Mux(rob_tail_idx.asUInt>rob_head_idx.asUInt, (i.asUInt >= rob_pnr_idx.asUInt), Mux(rob_head_idx.asUInt>rob_pnr_idx.asUInt, (i.asUInt>=rob_pnr_idx.asUInt), ((i.asUInt>=rob_pnr_idx.asUInt) || (i.asUInt < rob_tail_idx.asUInt))))
-    }), rob_head))
-    val ERP_rob_after_pnr            = rob_uop(rob_after_pnr_idx)
-    ERP_rob_after_pnr.speculative := true.B
-    //printf(" robpastpnridx: %d \n", rob_past_pnr_idx.asUInt)
-    io.after_pnr := DontCare
-    io.after_pnr.valid := ERP_rob_after_pnr.uses_ldq
-    io.after_pnr.bits := ERP_rob_after_pnr
-    */
-
-
 
     // use the same "com_uop" for both rollback AND commit
     // Perform Commit
@@ -524,14 +475,9 @@ class Rob(
         rob_val(i) := false.B
         rob_uop(i.U).debug_inst := BUBBLE
 
-        //specshieldERP+ (trying to untaint mispredicted entries)
-        shadow_regfile(rob_uop(i.U).pdst.asUInt) := 0.U 
-
       } .elsewhen (rob_val(i)) {
         // clear speculation bit even on correct speculation
         rob_uop(i).br_mask := GetNewBrMask(io.brupdate, br_mask)
-        //specshieldERP+ ()
-        shadow_regfile(rob_uop(i.U).pdst.asUInt) := 1.U
       }
     }
 
@@ -589,12 +535,6 @@ class Rob(
                !rob_val(GetRowIdx(rob_idx))),
                "[rob] writeback (" + i + ") occurred to an invalid ROB entry.")
 
-      // fast-bypass (Here we are commenting out the following assert)
-      /*
-      assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
-               !rob_bsy(GetRowIdx(rob_idx))),
-               "[rob] writeback (" + i + ") occurred to a not-busy ROB entry.")
-      */
       assert (!(io.wb_resps(i).valid && MatchBank(GetBankIdx(rob_idx)) &&
                temp_uop.ldst_val && temp_uop.pdst =/= io.wb_resps(i).bits.uop.pdst),
                "[rob] writeback (" + i + ") occurred to the wrong pdst.")
@@ -609,19 +549,7 @@ class Rob(
       debug_entry(w + i*coreWidth).unsafe    := rob_unsafe(i.U)
       debug_entry(w + i*coreWidth).uop       := rob_uop(i.U)
       debug_entry(w + i*coreWidth).exception := rob_exception(i.U)
-    }
-    /*
-    //specshieldERP+ (Temporarily Commented)
-    when(rob_pnr =/= rob_head){
-      rob_unt_idx := WrapDec(rob_pnr, numRobRows)
-    }
-    when((rob_pnr === rob_head) && (rob_unsafe(rob_head) === 0.B)){
-      rob_unt_idx := rob_head
-      printf("HEAD==PNR ==> HEAD_IDX: %d\n", rob_head)
     } 
-    rob_unt_idx_reg := (1.U << rob_uop(rob_unt_idx).pdst.asUInt)
-    */
-    
   } //for (w <- 0 until coreWidth)
 
   // **************************************************************************
@@ -800,14 +728,7 @@ class Rob(
   // Also doesn't require the rob tail (or head) to be exported to whatever we want to compare with the PNR.
 
   
-  //specshieldERP+ (Temporarily commented)
-  when(rob_pnr =/= rob_head){
-    rob_unt_idx := WrapDec(rob_pnr, numRobRows)
-  }
-  when((rob_pnr === rob_head) && (!rob_pnr_unsafe.reduce(_||_))){
-    rob_unt_idx := rob_head
-    printf("HEAD==PNR ==> HEAD_IDX: %d\n", rob_head)
-  }
+
 
 
   if (enableFastPNR) {
@@ -900,22 +821,6 @@ class Rob(
   io.rob_head_idx := rob_head_idx
   io.rob_tail_idx := rob_tail_idx
   io.rob_pnr_idx  := rob_pnr_idx
-  
-
-  //specshieldERP+ 
-  //io.rob_unt_idx  := (1.U << debug_entry(rob_unt_idx).uop.pdst.asUInt)
-  io.rob_unt_idx  := (debug_entry(rob_unt_idx).uop.pdst.asUInt)
-  io.rob_unt_vec  := shadow_regfile
-  printf("UNTAINT-ROB: %b\n", io.rob_unt_idx)
-  printf("UNTAINT-VEC:            ")
-  for (i <- 0 until numIntPhysRegs){
-    printf("%b", io.rob_unt_vec(i))
-  }
-  printf("\n")
-  /* (Temporarily commented)
-  //specshieldERP+ 
-  io.rob_unt_idx  := rob_unt_idx_reg
-  */
 
   io.empty        := empty
   io.ready        := (rob_state === s_normal) && !full && !r_xcpt_val

@@ -33,14 +33,7 @@ class MicroOp(implicit p: Parameters) extends BoomBundle
   with freechips.rocketchip.rocket.constants.MemoryOpConstants
   with freechips.rocketchip.rocket.constants.ScalarOpConstants
 {
-  //specshieldERP+ 
-  val speculative      = Bool()
-  val prs1_tainted     = Bool()
-  val prs2_tainted     = Bool()
-  val prs3_tainted     = Bool()
-  val issue_ready      = Bool()
-  val wake_tainted     = Bool()
-
+ 
   val uopc             = UInt(UOPC_SZ.W)       // micro-op code
   val inst             = UInt(32.W)
   val debug_inst       = UInt(32.W)

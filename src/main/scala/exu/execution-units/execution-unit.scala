@@ -41,8 +41,6 @@ class ExeUnitResp(val dataWidth: Int)(implicit p: Parameters) extends BoomBundle
   val data = Bits(dataWidth.W)
   val predicated = Bool() // Was this predicated off?
   val fflags = new ValidIO(new FFlagsResp) // write fflags to ROB // TODO: Do this better
-  //specshieldERP+
-  val tainted = Bool()
 }
 
 /**
@@ -276,6 +274,8 @@ class ALUExeUnit(
     // fast-bypass
     printf("execution unit: this is the opcode %d\n", io.req.bits.uop.uopc.asUInt)
     printf("execution unit: this is the fast_bypass %d\n", io.req.bits.uop.fast_bypass.asUInt)
+    printf("execution unit: this is the pc %x\n", io.req.bits.uop.debug_pc.asUInt)
+    
     alu.io.req.bits.uop      := io.req.bits.uop
     alu.io.req.bits.kill     := io.req.bits.kill
     alu.io.req.bits.rs1_data := io.req.bits.rs1_data
@@ -384,8 +384,6 @@ class ALUExeUnit(
     queue.io.brupdate := io.brupdate
     queue.io.flush := io.req.bits.kill
     
-    //specshieldERP+
-    queue.io.enq.bits.tainted := DontCare
 
     io.ll_fresp <> queue.io.deq
     ifpu_busy := !(queue.io.empty)
@@ -608,8 +606,6 @@ class FPUExeUnit(
     queue.io.brupdate          := io.brupdate
     queue.io.flush           := io.req.bits.kill
 
-    //specshieldERP+
-    queue.io.enq.bits.tainted := DontCare
 
     assert (queue.io.enq.ready) // If this backs up, we've miscalculated the size of the queue.
 
@@ -623,8 +619,6 @@ class FPUExeUnit(
     fp_sdq.io.brupdate         := io.brupdate
     fp_sdq.io.flush          := io.req.bits.kill
     
-    //specshieldERP+
-    fp_sdq.io.enq.bits.tainted := DontCare
 
     assert(!(fp_sdq.io.enq.valid && !fp_sdq.io.enq.ready))
 
