@@ -259,6 +259,8 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
     mem_units(i).io.lsu_io <> io.lsu.exe(i)
   }
 
+
+
   //-------------------------------------------------------------
   // Uarch Hardware Performance Events (HPEs)
 
@@ -307,6 +309,16 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val debug_jals    = Reg(Vec(4, UInt(xLen.W)))
   val debug_jalrs   = Reg(Vec(4, UInt(xLen.W)))
 
+
+   //assertion for Meltdown
+   //teesec
+   for (i <- 0 until memWidth) {
+    when (io.lsu.exe(i).req.valid.asBool && io.lsu.exe(i).req.bits.addr(xLen-1) === 1.U)
+    {
+      printf("LSU Req to a supervisor address")
+      assert (csr.io.status.prv === (PRV.S).U, "[lsu] Meltdown!")
+    } 
+  }
   for (j <- 0 until 4) {
     debug_brs(j) := debug_brs(j) + PopCount(VecInit((0 until coreWidth) map {i =>
       rob.io.commit.arch_valids(i) &&
