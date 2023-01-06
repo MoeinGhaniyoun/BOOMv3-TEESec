@@ -118,12 +118,6 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
       }
     }
 
-  //teesec
-    printf("BTB Resp valid: %d  Resp: %x s1_pc: %x s1_req_tag(37bit): 0x%x s1_req_tag(full): 0x%x Which bank? %d\n", s1_resp(w).valid, s1_resp(w).bits, (s1_pc.asSInt + (w << 1).S).asUInt, s1_req_tag(tagSz-1,0).asUInt, s1_req_tag.asUInt, w.asUInt);
-  }
-
-  //teesec
-  printf("BTB TagSize: %d   OffsetSize: %d vaddrBitsExtended: %d\n", tagSz.asUInt, offsetSz.asUInt, vaddrBitsExtended.asUInt);
 
 
 

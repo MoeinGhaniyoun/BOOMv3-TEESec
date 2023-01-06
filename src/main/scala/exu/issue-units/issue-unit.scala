@@ -90,8 +90,6 @@ class IssueUnitIO(
 
   val tsc_reg          = Input(UInt(width=xLen.W))
 
-  //fast-bypass
-  val fast_bypass       = Flipped(Valid(new MicroOp()))
 }
 
 /**
@@ -153,24 +151,12 @@ abstract class IssueUnit(
   //-------------------------------------------------------------
   // Issue Table
 
-  //fast-bypass
-  val done_fast_bypass = RegInit(false.B)
   
   val slots = for (i <- 0 until numIssueSlots) yield { val slot = Module(new IssueSlot(numWakeupPorts)); slot }
   val issue_slots = VecInit(slots.map(_.io))
 
-  // fast-bypass
-  for (i <- 0 until numIssueSlots){
-    issue_slots(i).fast_bypass := io.fast_bypass
-  }
   
-  //fast-bypass
-  done_fast_bypass := (issue_slots.map(s => s.done_fast_bypass).reduce(_|_))
   
-  // fast-bypass
-  for (i <- 0 until numIssueSlots){
-    issue_slots(i).clear_fast_bypass := done_fast_bypass
-  }
 
   for (i <- 0 until numIssueSlots) {
     issue_slots(i).wakeup_ports     := io.wakeup_ports

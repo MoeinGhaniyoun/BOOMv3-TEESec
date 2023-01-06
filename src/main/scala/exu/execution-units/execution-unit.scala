@@ -263,18 +263,13 @@ class ALUExeUnit(
                              numStages = numBypassStages,
                              dataWidth = xLen))
 
-    // fast-bypass (added condition to check whether we should execute this AND instruction)                         
     alu.io.req.valid := (
-      io.req.valid && !io.req.bits.uop.fast_bypass &&
+      io.req.valid && 
       (io.req.bits.uop.fu_code === FU_ALU ||
        io.req.bits.uop.fu_code === FU_JMP ||
       (io.req.bits.uop.fu_code === FU_CSR && io.req.bits.uop.uopc =/= uopROCC)))
     //ROCC Rocc Commands are taken by the RoCC unit
 
-    // fast-bypass
-    printf("execution unit: this is the opcode %d\n", io.req.bits.uop.uopc.asUInt)
-    printf("execution unit: this is the fast_bypass %d\n", io.req.bits.uop.fast_bypass.asUInt)
-    printf("execution unit: this is the pc %x\n", io.req.bits.uop.debug_pc.asUInt)
     
     alu.io.req.bits.uop      := io.req.bits.uop
     alu.io.req.bits.kill     := io.req.bits.kill

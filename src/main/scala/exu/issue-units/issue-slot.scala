@@ -50,12 +50,6 @@ class IssueSlotIO(val numWakeupPorts: Int)(implicit p: Parameters) extends BoomB
   val uop           = Output(new MicroOp()) // the current Slot's uop. Sent down the pipeline when issued.
   
 
-
-  // fast-bypass
-  val fast_bypass = Flipped(Valid(new MicroOp()))
-  val done_fast_bypass    = Output(Bool())
-  val clear_fast_bypass = Input(Bool())
-
   val debug = {
     val result = new Bundle {
       val p1 = Bool()
@@ -158,15 +152,7 @@ class IssueSlot(val numWakeupPorts: Int)(implicit p: Parameters)
     }
   }
 
-  //fast-bypass 
-  val temp_fast_bypass = Reg(new MicroOp())
-  val received_fast_bypass = RegInit(false.B)
-  val received_fast_bypass_temp = RegInit(false.B)
 
-  //fast-bypass
-  when(io.clear_fast_bypass){
-    received_fast_bypass := false.B
-  }
 
   when (io.in_uop.valid) {
     slot_uop := io.in_uop.bits
@@ -187,22 +173,6 @@ class IssueSlot(val numWakeupPorts: Int)(implicit p: Parameters)
     p2 := !(io.in_uop.bits.prs2_busy)
     p3 := !(io.in_uop.bits.prs3_busy)
     ppred := !(io.in_uop.bits.ppred_busy)
-  }
-
-  //fast-bypass 
-  when (io.fast_bypass.valid) {
-    temp_fast_bypass := io.fast_bypass.bits
-    received_fast_bypass := true.B
-    printf("Still valid!\n");
-  }
-  when (io.in_uop.valid  && received_fast_bypass.asBool && (temp_fast_bypass.pdst === io.in_uop.bits.prs1)) {
-    printf("Halle DADA\n");
-    p1 := true.B
-    p2 := true.B
-    p3 := true.B
-    received_fast_bypass_temp  := false.B
-    io.done_fast_bypass := true.B
-    printf("Setting fast_bypass flag in MicroOp.\n") 
   }
 
   
@@ -314,11 +284,6 @@ class IssueSlot(val numWakeupPorts: Int)(implicit p: Parameters)
   io.out_uop.iw_p1_poisoned := p1_poisoned
   io.out_uop.iw_p2_poisoned := p2_poisoned
 
-   //fast-bypass
-  when (received_fast_bypass.asBool && (slot_uop.uopc.asUInt === 19.U)) {
-    io.out_uop.fast_bypass := true.B
-    printf("Setting fast_bypass flag in MicroOp.\n")
-  }
 
   when (state === s_valid_2) {
     when (p1 && p2 && ppred) {

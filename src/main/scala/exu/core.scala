@@ -142,18 +142,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
                            numFpWakeupPorts))
   
   /////////////////////////////////////////////////////////////////
-  //fast-bypass
-  fp_pipeline.io.fast_bypass := dispatcher.io.fast_bypass
-  iregfile.io.fast_bypass := dispatcher.io.fast_bypass 
-  mem_iss_unit.io.fast_bypass := iregfile.io.fast_bypass_resp
-  val fast_bypass_resp = RegNext(iregfile.io.fast_bypass_resp)
-  //int_iss_unit.io.fast_bypass := fast_bypass_resp
-  int_iss_unit.io.fast_bypass := iregfile.io.fast_bypass_resp
-  rob.io.fast_bypass := fast_bypass_resp
-  
-  
-  
-  
   
   
   
@@ -310,15 +298,6 @@ class BoomCore(usingTrace: Boolean)(implicit p: Parameters) extends BoomModule
   val debug_jalrs   = Reg(Vec(4, UInt(xLen.W)))
 
 
-   //assertion for Meltdown
-   //teesec
-   for (i <- 0 until memWidth) {
-    when (io.lsu.exe(i).req.valid.asBool && io.lsu.exe(i).req.bits.addr(xLen-1) === 1.U)
-    {
-      printf("LSU Req to a supervisor address")
-      assert (csr.io.status.prv === (PRV.S).U, "[lsu] Meltdown!")
-    } 
-  }
   for (j <- 0 until 4) {
     debug_brs(j) := debug_brs(j) + PopCount(VecInit((0 until coreWidth) map {i =>
       rob.io.commit.arch_valids(i) &&

@@ -82,9 +82,6 @@ abstract class RegisterFile(
   val io = IO(new BoomBundle {
     val read_ports = Vec(numReadPorts, new RegisterFileReadPortIO(maxPregSz, registerWidth))
     val write_ports = Flipped(Vec(numWritePorts, Valid(new RegisterFileWritePort(maxPregSz, registerWidth))))
-    // fast-bypass
-    val fast_bypass = Flipped(Valid(new MicroOp()))
-    val fast_bypass_resp = Valid(new MicroOp())  
   })
   
   private val rf_cost = (numReadPorts + numWritePorts) * (numReadPorts + 2*numWritePorts)
@@ -131,18 +128,6 @@ class RegisterFileSynthesizable(
     read_data(i) := regfile(read_addrs(i))
   }
   
-  //fast-bypass
-  io.fast_bypass_resp.valid := 0.U 
-  when (io.fast_bypass.valid === 1.U && !(io.fast_bypass.bits.prs1_busy)){
-    io.fast_bypass_resp.bits := io.fast_bypass.bits
-    io.fast_bypass_resp.valid := Mux(regfile(io.fast_bypass.bits.prs1) === 0.U, 1.U, 0.U)
-    io.fast_bypass_resp.bits.fast_bypass := Mux(regfile(io.fast_bypass.bits.prs1) === 0.U, true.B, false.B) && io.fast_bypass_resp.valid
-    printf("Received read request from Dispatch. respValid: %d  resp: 0x%x\n", io.fast_bypass_resp.valid, io.fast_bypass_resp.bits.uopc)
-  }
-  when (io.fast_bypass_resp.valid){
-    regfile(io.fast_bypass.bits.pdst) := 0.U
-    printf("Writing zero on register file for fast-bypass\n")
-  }
 
 
 

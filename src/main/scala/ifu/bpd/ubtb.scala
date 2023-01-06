@@ -49,8 +49,6 @@ class MicroBTBBranchPredictorBank(params: BoomMicroBTBParams)(implicit p: Parame
     val ctrs  = Vec(bankWidth, UInt(2.W))
   }
   
-  //teesec
-  printf("UBTB is in use\n");
 
   val s1_meta = Wire(new MicroBTBPredictMeta)
   override val metaSz = s1_meta.asUInt.getWidth

@@ -266,18 +266,6 @@ class LSU(implicit p: Parameters, edge: TLEdgeOut) extends BoomModule()(p)
   
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Printing incomming LSU requests and responses
-val assert_pc = RegInit(0.U(32.W))
-//teesec
-when (io.core.exe(i).req.valid.asBool && io.core.exe(i).req.bits.addr(xLen-1) === 1.U )
-{
-  printf("LSU Req to a supervisor address")
-  assert_pc := io.core.exe(i).req.bits.uop.debug_pc 
-
-}
-assert (assert_pc === io.dmem.resp(i).bits.uop.debug_pc && io.dmem.resp(i).valid.asBool, "[lsu] Meltdown!")
-
-
-
 printf ("IncommingLSUReq: ")
 for (i <- 0 until memWidth) {
   printf ("PC:0x%x  Address:0x%x (%c)\n", io.core.exe(i).req.bits.uop.debug_pc, io.core.exe(i).req.bits.addr, BoolToChar(io.core.exe(i).req.valid, 'V'))

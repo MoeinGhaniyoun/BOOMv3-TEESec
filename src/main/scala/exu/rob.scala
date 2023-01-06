@@ -115,8 +115,6 @@ class RobIo(
 
   val debug_tsc = Input(UInt(xLen.W))
 
-  //fast-bypass
-  val fast_bypass = Flipped(Valid(new MicroOp))
 }
 
 /**
@@ -366,13 +364,6 @@ class Rob(
     }
 
 
-    // fast-bypass
-    val row_idx_fast_bypass = GetRowIdx(io.fast_bypass.bits.rob_idx)
-    when ((io.fast_bypass.valid === 1.U) && MatchBank(GetBankIdx(io.fast_bypass.bits.rob_idx))){
-      printf("In ROB. Zeroing out the busy bit of AND inst. Opcode is: %d\n", io.fast_bypass.bits.uopc.asUInt)
-      rob_bsy(row_idx_fast_bypass) := false.B
-      rob_unsafe(row_idx_fast_bypass) := false.B
-    }
 
     // Stores have a separate method to clear busy bits
     for (clr_rob_idx <- io.lsu_clr_bsy) {
