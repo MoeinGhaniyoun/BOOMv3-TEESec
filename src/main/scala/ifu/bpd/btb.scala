@@ -117,7 +117,7 @@ class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p
         io.resp.f3(w).taken      := true.B
       }
     }
-
+  }
 
 
 
